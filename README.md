@@ -1,135 +1,150 @@
-# Credit Risk Modeling with Explainable Machine Learning
 
-## Project Overview
+## Bayesian GARCH(1,1) with PyMC
 
-This project builds a **credit risk scoring system** to estimate the **probability of default (PD)** for loan applicants using supervised machine learning.
-The focus is not just predictive performance, but **model interpretability, stability, and risk awareness**, aligning with real-world financial institutions and regulatory expectations.
+### Overview
 
-The project follows a **time-aware modeling pipeline** to avoid data leakage and emphasizes explainability and model validation.
+This project implements a **Bayesian GARCH(1,1)** (Generalized Autoregressive Conditional Heteroskedasticity) model for estimating and forecasting financial return volatility. The model is implemented in **PyMC** and uses **Markov Chain Monte Carlo (MCMC)** to infer posterior distributions over volatility dynamics and tail behavior.
 
----
+The notebook demonstrates a complete workflow from synthetic data generation to probabilistic risk metrics such as **Value-at-Risk (VaR)** and **Expected Shortfall (ES)**.
 
-## Objectives
+### Dependencies
 
-* Predict loan default probability using tabular financial data
-* Compare traditional statistical models with modern ML models
-* Apply explainability techniques suitable for regulated environments
-* Evaluate model stability over time
+Required Python libraries:
 
----
+- `pymc`
+- `arviz`
+- `numpy`
+- `matplotlib`
+- `pytensor`
 
-## Dataset
+Install dependencies with:
 
-**Source**: Lending Club / Home Credit Default Risk (public dataset)
-**Target Variable**: Loan default (binary)
-**Features**:
-
-* Applicant financial attributes
-* Loan characteristics
-* Credit history indicators
-
-Time information is preserved to simulate real deployment conditions.
-
----
-
-## Methodology
+```bash
+pip install pymc arviz numpy matplotlib pytensor
+````
+### Workflow
 
 ### 1. Data Preparation
 
-* Missing value handling
-* Feature scaling where appropriate
-* Time-based train / validation / test split
-* Class imbalance handling
+* Synthetic financial returns of length $T = 1000$ are generated.
+* Returns follow a **Student’s t-distribution** to reflect heavy tails.
+* The return series is demeaned before modeling.
 
-### 2. Models
+### 2. Model Definition
 
-* Logistic Regression (baseline, interpretable)
-* Gradient Boosting (XGBoost / LightGBM)
+A Bayesian **GARCH(1,1)** model is specified as follows.
 
-### 3. Evaluation Metrics
+#### Volatility Dynamics
 
-* ROC-AUC
-* Precision-Recall AUC
-* KS statistic
-* Calibration curves
+The conditional variance evolves according to:
 
-Accuracy is intentionally avoided due to class imbalance.
+$$
+\sigma_t^2 = \omega + \alpha r_{t-1}^2 + \beta \sigma_{t-1}^2
+$$
 
----
+To enforce stationarity ($\alpha + \beta < 1$), the model uses the reparameterization:
 
-## Explainability & Model Risk
+$$
+\alpha = \kappa \phi
+$$
 
-* SHAP values for global and local explanations
-* Feature importance consistency checks
-* Partial dependence analysis
-* Population Stability Index (PSI) for drift detection
+$$
+\beta = \kappa (1 - \phi)
+$$
 
-This section is designed to mirror **model risk management** practices in banking.
+#### Priors
 
----
+$$
+\kappa \sim \text{Beta}(20, 1.5)
+$$
 
-## Results Summary
+$$
+\phi \sim \text{Beta}(2, 2)
+$$
 
-* ML models outperform baseline logistic regression on ROC-AUC
-* Logistic regression remains competitive after calibration
-* Key risk drivers align with financial intuition
-* Model stability varies across time windows
+$$
+\omega \sim \text{HalfNormal}(0.1)
+$$
 
-Detailed results and plots are provided in the notebooks.
+$$
+\nu \sim \text{Exponential}(0.1) + 2
+$$
 
----
+#### Likelihood
 
-## Limitations
+Returns are modeled using a Student-t distribution:
 
-* Public dataset may not reflect full production complexity
-* No macroeconomic variables included
-* Label noise and reporting bias possible
+$$
+r_t \sim \text{StudentT}(0, \sigma_t, \nu)
+$$
 
-These limitations are explicitly acknowledged, as required in regulated environments.
+This allows the model to capture heavy tails and extreme returns.
 
----
+#### Initialization
 
-## Tools & Technologies
+The initial variance is set to the stationary variance:
 
-* Python
-* pandas, numpy
-* scikit-learn
-* XGBoost / LightGBM
-* SHAP
-* matplotlib / seaborn
+$$
+\sigma_0^2 = \frac{\omega}{1 - \alpha - \beta}
+$$
 
----
+The volatility recursion is evaluated efficiently using `pytensor.scan`.
 
-## Repository Structure
+### 3. Bayesian Inference
 
-```
-├── data/
-│   ├── raw/
-│   ├── processed/
-├── notebooks/
-│   ├── 01_eda.ipynb
-│   ├── 02_feature_engineering.ipynb
-│   ├── 03_model_training.ipynb
-│   ├── 04_model_explainability.ipynb
-├── src/
-│   ├── preprocessing.py
-│   ├── modeling.py
-│   ├── evaluation.py
-├── reports/
-│   └── credit_risk_model_report.pdf
-├── README.md
-```
+* Posterior inference is performed using the **No-U-Turn Sampler (NUTS)**.
+* Sampling configuration:
 
----
+  * 2,000 draws per chain
+  * 4 chains
+* The result is a full posterior distribution over all model parameters.
 
-## Key Takeaway
+### 4. Diagnostics
 
-This project demonstrates how machine learning can be applied responsibly to **credit risk assessment**, balancing predictive performance with transparency, stability, and business relevance.
+Model convergence is assessed using **ArviZ**:
 
----
+* Trace plots
+* $\hat{R}$ (R-hat) statistics
+* Effective Sample Size (ESS)
 
-## Future Work
+All diagnostics indicate stable sampling and well-mixed chains.
 
-* Incorporate macroeconomic stress scenarios
-* Add challenger vs champion model framework
-* Deploy as a scoring API with monitoring
+### 5. Analysis and Visualization
+
+* **Volatility Plot**: Posterior mean volatility $\sigma_t$ plotted alongside observed returns.
+* **Posterior Predictive Check (PPC)**: Simulated return paths drawn from the posterior to assess model fit.
+
+### 6. Forecasting and Risk Management
+
+#### One-Step-Ahead Volatility Forecast
+
+$$
+\sigma_{t+1}^2 = \omega + \alpha r_t^2 + \beta \sigma_t^2
+$$
+
+Posterior means are used for point forecasts.
+
+#### Risk Metrics
+
+* **1% Value-at-Risk (VaR)**
+  The loss threshold exceeded with 1% probability.
+
+* **1% Expected Shortfall (ES)**
+  The expected loss conditional on losses exceeding the 1% VaR.
+
+Both metrics are derived from the posterior predictive distribution.
+
+### Usage
+
+1. Open `bayesian_garch(1,1).ipynb` in a Jupyter environment.
+2. Install all dependencies.
+3. Run all cells sequentially.
+
+### Key Outputs
+
+* Trace plots confirming convergence
+* Volatility vs. returns visualization
+* One-step-ahead volatility forecast
+* 1% VaR and Expected Shortfall estimates
+
+
